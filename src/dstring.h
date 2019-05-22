@@ -49,3 +49,4 @@ void ds_resize (dynamic_string *string, int size);
 char *ds_fgetname (FILE *f, dynamic_string *s);
 char *ds_fgets (FILE *f, dynamic_string *s);
 char *ds_fgetstr (FILE *f, dynamic_string *s, char eos);
+char *ds_sgetstr (char *input_string, dynamic_string *s, char eos);

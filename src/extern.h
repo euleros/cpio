@@ -19,6 +19,7 @@
 
 #include "paxlib.h"
 #include "quotearg.h"
+#include "initramfs.h"
 #include "quote.h"
 
 enum archive_format
@@ -99,6 +100,7 @@ extern char output_is_seekable;
 extern int (*xstat) ();
 extern void (*copy_function) ();
 extern char *change_directory_option;
+extern enum metadata_types metadata_type;
 
 
 /* copyin.c */
