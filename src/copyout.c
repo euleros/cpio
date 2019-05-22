@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/xattr.h>
 #include "filetypes.h"
 #include "cpiohdr.h"
 #include "dstring.h"
@@ -578,6 +579,92 @@ assign_string (char **pvar, char *value)
   *pvar = p;
 }
 
+static int
+write_xattrs (int metadata_fd, char *path)
+{
+  struct metadata_hdr hdr = { .c_version = 1, .c_type = TYPE_XATTR };
+  char str[sizeof(hdr.c_size) + 1];
+  char *xattr_list, *list_ptr, *xattr_value = NULL;
+  ssize_t list_len, name_len, value_len, len;
+  int ret = -EINVAL;
+
+  if (metadata_fd < 0)
+    return 0;
+
+  list_len = llistxattr(path, NULL, 0);
+  if (list_len <= 0)
+    return -ENOENT;
+
+  list_ptr = xattr_list = malloc(list_len);
+  if (!list_ptr) {
+    error (0, 0, _("out of memory"));
+    return ret;
+  }
+
+  len = llistxattr(path, xattr_list, list_len);
+  if (len != list_len)
+    goto out;
+
+  if (ftruncate(metadata_fd, 0))
+    goto out;
+
+  lseek(metadata_fd, 0, SEEK_SET);
+
+  while (list_ptr < xattr_list + list_len) {
+    name_len = strlen(list_ptr);
+
+    value_len = lgetxattr(path, list_ptr, NULL, 0);
+    if (value_len < 0) {
+      error (0, 0, _("cannot get xattrs"));
+      break;
+    }
+
+    if (value_len) {
+      xattr_value = malloc(value_len);
+      if (!xattr_value) {
+	error (0, 0, _("out of memory"));
+	break;
+      }
+    } else {
+      xattr_value = NULL;
+    }
+
+    len = lgetxattr(path, list_ptr, xattr_value, value_len);
+    if (len != value_len)
+      break;
+
+    snprintf(str, sizeof(str), "%.8lx",
+	     sizeof(hdr) + name_len + 1 + value_len);
+
+    memcpy(hdr.c_size, str, sizeof(hdr.c_size));
+
+    if (write(metadata_fd, &hdr, sizeof(hdr)) != sizeof(hdr))
+      break;
+
+    if (write(metadata_fd, list_ptr, name_len + 1) != name_len + 1)
+      break;
+
+    if (write(metadata_fd, xattr_value, value_len) != value_len)
+      break;
+
+    if (fsync(metadata_fd))
+      break;
+
+    list_ptr += name_len + 1;
+    free(xattr_value);
+    xattr_value = NULL;
+  }
+
+  free(xattr_value);
+out:
+  free(xattr_list);
+
+  if (list_ptr != xattr_list + list_len)
+    return ret;
+
+  return 0;
+}
+
 /* Read a list of file names from the standard input
    and write a cpio collection on the standard output.
    The format of the header depends on the compatibility (-c) flag.  */
@@ -591,6 +678,8 @@ process_copy_out ()
   int in_file_des;		/* Source file descriptor.  */
   int out_file_des;		/* Output file descriptor.  */
   char *orig_file_name = NULL;
+  char template[] = "/tmp/cpio-metadata-XXXXXX";
+  int ret, metadata_fd, metadata = 0, old_metadata, hard_link;
 
   /* Initialize the copy out.  */
   ds_init (&input_name, 128);
@@ -623,9 +712,37 @@ process_copy_out ()
       prepare_append (out_file_des);
     }
 
+  /* Create a temporary file to store file metadata */
+  if (metadata_type != TYPE_NONE) {
+    metadata_fd = mkstemp(template);
+    if (metadata_fd < 0) {
+      error (0, 0, _("cannot create temporary file"));
+      return;
+    }
+  }
+
   /* Copy files with names read from stdin.  */
-  while (ds_fgetstr (stdin, &input_name, name_end) != NULL)
+  while ((metadata_type != TYPE_NONE && metadata) ||
+	 ds_fgetstr (stdin, &input_name, name_end) != NULL)
     {
+      old_metadata = metadata;
+      hard_link = 0;
+
+      if (metadata) {
+	metadata = 0;
+
+        if (metadata_type != TYPE_XATTR) {
+	  error (0, 0, _("metadata type not supported"));
+	  continue;
+	}
+
+	ret = write_xattrs(metadata_fd, orig_file_name);
+	if (ret < 0)
+	  continue;
+
+	ds_sgetstr (template, &input_name, name_end);
+      }
+
       /* Check for blank line.  */
       if (input_name.ds_string[0] == 0)
 	{
@@ -655,8 +772,15 @@ process_copy_out ()
 		    }
 		}
 	    }
-	  
-	  assign_string (&orig_file_name, input_name.ds_string);
+
+	  if (old_metadata) {
+	    assign_string (&orig_file_name, template);
+	    ds_sgetstr (METADATA_FILENAME, &input_name, name_end);
+	    file_hdr.c_mode |= 0x10000;
+	  } else {
+	    assign_string (&orig_file_name, input_name.ds_string);
+	  }
+
 	  cpio_safer_name_suffix (input_name.ds_string, false,
 				  !no_abs_paths_flag, true);
 #ifndef HPUX_CDF
@@ -708,6 +832,7 @@ process_copy_out ()
 		  else
 		    {
 		      add_link_defer (&file_hdr);
+		      hard_link = 1;
 		      break;
 		    }
 		}
@@ -844,6 +969,8 @@ process_copy_out ()
 	    fprintf (stderr, "%s\n", orig_file_name);
 	  if (dot_flag)
 	    fputc ('.', stderr);
+	  if (metadata_type != TYPE_NONE && !old_metadata && !hard_link)
+	    metadata = 1;
 	}
     }
 
@@ -882,6 +1009,11 @@ process_copy_out ()
 	       ngettext ("%lu block\n", "%lu blocks\n",
 			 (unsigned long) blocks), (unsigned long) blocks);
     }
+
+  if (metadata_type != TYPE_NONE) {
+    close(metadata_fd);
+    unlink(template);
+  }
 }
 
 

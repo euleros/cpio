@@ -200,6 +200,8 @@ static struct argp_option options[] = {
   {"device-independent", DEVICE_INDEPENDENT_OPTION, NULL, 0,
    N_("Create device-independent (reproducible) archives") },
   {"reproducible", 0, NULL, OPTION_ALIAS },
+  {"file-metadata", 'e', N_("TYPE"), 0,
+   N_("Include file metadata"), GRID+1 },
 #undef GRID
   
   /* ********** */
@@ -293,6 +295,22 @@ warn_control (char *arg)
   return 1;
 }
 
+static enum metadata_types
+parse_metadata_type(char *arg)
+{
+  static char *metadata_type_str[TYPE__LAST] = {
+    [TYPE_NONE] = "none",
+    [TYPE_XATTR] = "xattr",
+  };
+  int i;
+
+  for (i = 0; i < TYPE__LAST; i++)
+    if (!strcmp (metadata_type_str[i], arg))
+      return i;
+
+  return TYPE_NONE;
+}
+
 static error_t
 parse_opt (int key, char *arg, struct argp_state *state)
 {
@@ -352,6 +370,10 @@ parse_opt (int key, char *arg, struct argp_state *state)
       
     case 'f':		/* Only copy files not matching patterns.  */
       copy_matching_files = false;
+      break;
+
+    case 'e':		/* Metadata type.  */
+      metadata_type = parse_metadata_type(arg);
       break;
 
     case 'E':		/* Pattern file name.  */

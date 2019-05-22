@@ -199,3 +199,5 @@ char *change_directory_option;
 int renumber_inodes_option;
 int ignore_devno_option;
 
+/* include file metadata into the image */
+enum metadata_types metadata_type = TYPE_NONE;

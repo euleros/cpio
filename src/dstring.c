@@ -60,8 +60,8 @@ ds_resize (dynamic_string *string, int size)
    Return NULL if end of file is detected.  Otherwise,
    Return a pointer to the null-terminated string in S.  */
 
-char *
-ds_fgetstr (FILE *f, dynamic_string *s, char eos)
+static char *
+ds_fgetstr_common (FILE *f, char *input_string, dynamic_string *s, char eos)
 {
   int insize;			/* Amount needed for line.  */
   int strsize;			/* Amount allocated for S.  */
@@ -72,7 +72,10 @@ ds_fgetstr (FILE *f, dynamic_string *s, char eos)
   strsize = s->ds_length;
 
   /* Read the input string.  */
-  next_ch = getc (f);
+  if (input_string)
+    next_ch = *input_string++;
+  else
+    next_ch = getc (f);
   while (next_ch != eos && next_ch != EOF)
     {
       if (insize >= strsize - 1)
@@ -81,7 +84,10 @@ ds_fgetstr (FILE *f, dynamic_string *s, char eos)
 	  strsize = s->ds_length;
 	}
       s->ds_string[insize++] = next_ch;
-      next_ch = getc (f);
+      if (input_string)
+	next_ch = *input_string++;
+      else
+	next_ch = getc (f);
     }
   s->ds_string[insize++] = '\0';
 
@@ -89,6 +95,12 @@ ds_fgetstr (FILE *f, dynamic_string *s, char eos)
     return NULL;
   else
     return s->ds_string;
+}
+
+char *
+ds_fgetstr (FILE *f, dynamic_string *s, char eos)
+{
+  return ds_fgetstr_common (f, NULL, s, eos);
 }
 
 char *
@@ -101,4 +113,10 @@ char *
 ds_fgetname (FILE *f, dynamic_string *s)
 {
   return ds_fgetstr (f, s, '\0');
+}
+
+char *
+ds_sgetstr (char *input_string, dynamic_string *s, char eos)
+{
+  return ds_fgetstr_common (NULL, input_string, s, eos);
 }

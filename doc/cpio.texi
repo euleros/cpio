@@ -275,6 +275,9 @@ Set the I/O block size to the given @var{number} of bytes.
 @item -D @var{dir}
 @itemx --directory=@var{dir}
 Change to directory @var{dir}
+@item -e @var{type}
+@itemx --file-metadata=@var{type}
+Include in the image file metadata with the specified type.
 @item --force-local
 Treat the archive file as local, even if its name contains colons.
 @item -F [[@var{user}@@]@var{host}:]@var{archive-file}
